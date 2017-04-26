@@ -610,7 +610,7 @@ int checkACL(struct clientparam * param){
 		if(ACLmatches(acentry, param)) {
 			param->nolog = acentry->nolog;
 			param->weight = acentry->weight;
-			if(acentry->action == 2) {
+			if(acentry->action == 2) { /* 2 == REDIRECT */
 				struct ace dup;
 
 				if(param->operation < 256 && !(param->operation & CONNECT)){

@@ -395,7 +395,7 @@ struct srvparam {
 	int silent;
 	int transparent;
 	int nfilters, nreqfilters, nhdrfilterscli, nhdrfilterssrv, npredatfilters, ndatfilterscli, ndatfilterssrv;
-	int family;
+	int family; /* 4 || 6 */
 	int stacksize;
 	int noforce;
 	int anonymous;
@@ -492,6 +492,7 @@ struct clientparam {
 	uint64_t
 			maxtrafin64,
 			maxtrafout64;
+    /* seems like it's client/{listen,remote}, server/{listen,remote} inaddr structs */
 #ifndef NOIPV6
 	struct sockaddr_in6	sincl, sincr, sinsl, sinsr, req;
 #else

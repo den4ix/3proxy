@@ -15,6 +15,56 @@ unsigned char * commands[] = {(unsigned char *)"UNKNOWN", (unsigned char *)"CONN
 #define BUFSIZE 1024
 #define LARGEBUFSIZE 67000
 
+// parent 1000 socks5 89.108.118.24 1080 proxyuser proxypasswd
+// app.user-ip-port
+int megaindex_login(char *buf, char *argv[7])
+{
+    char app[32];
+    char *p, *q;
+
+    p = buf;
+    if (!(q = strchr(p,'.')))
+        return 0;
+    *q++ = 0;
+    strncpy(app, p, 31); app[31] = 0;
+
+    if (!(p = strchr(q, '-')))
+        return 0;
+    *p++ = 0;
+    strncpy(argv[5], q, 255); argv[5][255] = 0;
+
+    if (!(q = strchr(p, '-')))
+        return 0;
+    *q++ = 0;
+    strncpy(argv[3], p, 15); argv[3][15] = 0;
+    strncpy(argv[4], q, 5); argv[4][5] = 0;
+
+    if (!strcmp(argv[4], "1080"))
+        strcpy(argv[2], "socks5");
+    else if (!strcmp(argv[4], "8080") || !strcmp(argv[4], "81"))
+        strcpy(argv[2], "http");
+    else
+        return 0;
+    
+    strcpy(buf, argv[5]);
+    return 1;
+}
+
+int megaindex_passwd(char *buf, char *argv[7])
+{
+    char app[32]; 
+    char *p;
+
+    if (!(p = strchr(buf, '.')))
+        return 0;
+    *p++ = 0;
+    strncpy(app, buf, 31); app[31] = 0;
+    strncpy(argv[6], p, 255); argv[6][255] = 0;
+    strcpy(buf, argv[6]);
+
+    return 1;
+}
+
 void * sockschild(struct clientparam* param) {
  int res;
  unsigned i=0;
@@ -34,7 +84,15 @@ void * sockschild(struct clientparam* param) {
  struct sockaddr_in sin = {AF_INET};
 #endif
  int len;
-
+ /* megaindex hooks */
+ char parent[] = "parent";
+ char weight[] = "1000";
+ char type[9];
+ char proxyip[16];
+ char proxyport[6];
+ char proxyuser[256];
+ char proxypasswd[256];
+ char *argv[7] = {parent, weight, type, proxyip, proxyport, proxyuser, proxypasswd};
 
  param->service = S_SOCKS;
 
@@ -46,7 +104,7 @@ void * sockschild(struct clientparam* param) {
  param->service = ver;
  if(ver == 5){
 	 if ((i = sockgetcharcli(param, conf.timeouts[SINGLEBYTE_S], 0)) == EOF) {RETURN(441);} /* nmethods */
-	 for (; i; i--) {
+	 for (; i; i--) { /* iterate through all the nmethods */
 		if ((res = sockgetcharcli(param, conf.timeouts[SINGLEBYTE_S], 0)) == EOF) {RETURN(441);}
 		if (res == 2 && param->srv->needuser) {
 			havepass = res;
@@ -56,22 +114,33 @@ void * sockschild(struct clientparam* param) {
 	 buf[1] = (param->srv->needuser > 1 && !havepass)? 255 : havepass;
 	 if(socksend(param->clisock, buf, 2, conf.timeouts[STRING_S])!=2){RETURN(401);}
 	 if (param->srv->needuser > 1 && !havepass) RETURN(4);
+     /* authentication */
 	 if (havepass) {
-		if (((res = sockgetcharcli(param, conf.timeouts[SINGLEBYTE_L], 0))) != 1) {
+		if (((res = sockgetcharcli(param, conf.timeouts[SINGLEBYTE_L], 0))) != 1) { /* the version is 1 */
 			RETURN(412);
 		}
-		if ((i = sockgetcharcli(param, conf.timeouts[SINGLEBYTE_S], 0)) == EOF) {RETURN(451);}
-		if (i && (unsigned)(res = sockgetlinebuf(param, CLIENT, buf, i, 0, conf.timeouts[STRING_S])) != i){RETURN(441);};
+		if ((i = sockgetcharcli(param, conf.timeouts[SINGLEBYTE_S], 0)) == EOF) {RETURN(451);} /* the number of chars in the login */
+		if (i && (unsigned)(res = sockgetlinebuf(param, CLIENT, buf, i, 0, conf.timeouts[STRING_S])) != i){RETURN(441);}; /* read login in buf */
 		buf[i] = 0;
+
+        if (!megaindex_login(buf, argv)) {RETURN(441);}
+
 		if(!param->username)param->username = (unsigned char *)mystrdup((char *)buf);
-		if ((i = sockgetcharcli(param, conf.timeouts[SINGLEBYTE_S], 0)) == EOF) {RETURN(445);}
-		if (i && (unsigned)(res = sockgetlinebuf(param, CLIENT, buf, i, 0, conf.timeouts[STRING_S])) != i){RETURN(441);};
+		if ((i = sockgetcharcli(param, conf.timeouts[SINGLEBYTE_S], 0)) == EOF) {RETURN(445);} /* the nr of chars in the password */
+		if (i && (unsigned)(res = sockgetlinebuf(param, CLIENT, buf, i, 0, conf.timeouts[STRING_S])) != i){RETURN(441);}; /* read the password in buf */
 		buf[i] = 0;
+
+        if (!megaindex_passwd(buf, argv)) {RETURN(441);}
+
 		if(!param->password)param->password = (unsigned char *)mystrdup((char *)buf);
+        /* send auth successfully received */
 		buf[0] = 1;
 		buf[1] = 0;
 		if(socksend(param->clisock, buf, 2, conf.timeouts[STRING_S])!=2){RETURN(481);}
+
+        if (megaindex_chain_hook(param, 7, argv) != 0) {RETURN(441);}
 	 }
+     /* read command, the version is 5 */
 	 if ((c = sockgetcharcli(param, conf.timeouts[SINGLEBYTE_L], 0)) != 5) {
 		RETURN(421);
          } /* version */
@@ -100,6 +169,7 @@ void * sockschild(struct clientparam* param) {
 		*SAFAMILY(&param->sinsr) = *SAFAMILY(&param->req) = AF_INET6;
 #endif
 	case 1:
+        /* get 4 or 16 bytes of destination address to connect to */
 		for (i = 0; i<size; i++){
 			if ((res = sockgetcharcli(param, conf.timeouts[SINGLEBYTE_S], 0)) == EOF) {RETURN(441);}
 			buf[i] = (unsigned char)res;
@@ -139,8 +209,9 @@ void * sockschild(struct clientparam* param) {
 		RETURN(997);
  }
  if(param->hostname)myfree(param->hostname);
+ /* put ip presentation of the hostname in buf */
  param->hostname = (unsigned char *)mystrdup((char *)buf);
- if (ver == 5) {
+ if (ver == 5) { // fill port (cmd==1)
 	 if ((res = sockgetcharcli(param, conf.timeouts[SINGLEBYTE_S], 0)) == EOF) {RETURN(441);}
 	 buf[0] = (unsigned char) res;
 	 if ((res = sockgetcharcli(param, conf.timeouts[SINGLEBYTE_S], 0)) == EOF) {RETURN(441);}
@@ -198,11 +269,11 @@ void * sockschild(struct clientparam* param) {
 	default:
 	 RETURN(997);
  }
-
+ /* authenticate */
  if((res = (*param->srv->authfunc)(param))) {
 	RETURN(res);
  }
-
+ /* in case of BIND or UDP ASSOCIATE */
  if(command > 1) {
 	if(so._bind(param->remsock,(struct sockaddr *)&param->sinsl,SASIZE(&param->sinsl))) {
 		*SAPORT(&param->sinsl) = 0;
