@@ -122,7 +122,7 @@ int clientnegotiate(struct chain * redir, struct clientparam * param, struct soc
 			buf[0] = 5;
 			buf[1] = 1;
 			buf[2] = user? 2 : 0;
-			if(socksend(param->remsock, buf, 3, conf.timeouts[CHAIN_TO]) != 3){
+			if(socksend(param->remsock, buf, 3, conf.timeouts[CHAIN_TO]) != 3){ /* remsock the one we connected in alwaysauth() t.i next chain hop */
 				return 51;
 			}
 			param->statssrv64+=len;
@@ -299,7 +299,7 @@ int handleredirect(struct clientparam * param, struct ace * acentry){
 				param->sinsr = cur->addr;
 			}
 
-			if((res = alwaysauth(param))){
+			if((res = alwaysauth(param))){ /* connect to remote hop + traffic count */
 				return (res == 10)? res : 60+res;
 			}
 		}
@@ -327,7 +327,7 @@ int handleredirect(struct clientparam * param, struct ace * acentry){
 	}
 
 	if(!connected || !redir) return 0;
-	return clientnegotiate(redir, param, (struct sockaddr *)&param->req, param->hostname);
+	return clientnegotiate(redir, param, (struct sockaddr *)&param->req, param->hostname); /* negotiate with next hop in chain */
 }
 
 int IPInentry(struct sockaddr *sa, struct iplist *ipentry){
@@ -343,10 +343,10 @@ int IPInentry(struct sockaddr *sa, struct iplist *ipentry){
 
 
 	addrlen = SAADDRLEN(sa);
-	
+
 	if(memcmp(ip,ipf,addrlen) < 0 || memcmp(ip,ipt,addrlen) > 0) return 0;
 	return 1;
-	
+
 }
 
 int ACLmatches(struct ace* acentry, struct clientparam * param){
@@ -358,7 +358,7 @@ int ACLmatches(struct ace* acentry, struct clientparam * param){
 	struct hostname * hstentry=NULL;
 	int i;
 	int match = 0;
-	
+
 	username = param->username?param->username:(unsigned char *)"-";
 	if(acentry->src) {
 	 for(ipentry = acentry->src; ipentry; ipentry = ipentry->next)
@@ -482,14 +482,14 @@ unsigned bandlimitfunc(struct clientparam *param, unsigned nbytesin, unsigned nb
 	sec = tv.tv_sec;
 	msec = tv.tv_usec;
 #endif
-	
+
 	if(!nbytesin && !nbytesout) return 0;
 	pthread_mutex_lock(&bandlim_mutex);
 	if(param->paused != conf.paused){
 		return (1);
 	}
 	for(i=0; nbytesin&& i<MAXBANDLIMS && param->bandlims[i]; i++){
-		if( !param->bandlims[i]->basetime || 
+		if( !param->bandlims[i]->basetime ||
 			param->bandlims[i]->basetime > sec ||
 			param->bandlims[i]->basetime < (sec - 120)
 		  )
@@ -506,7 +506,7 @@ unsigned bandlimitfunc(struct clientparam *param, unsigned nbytesin, unsigned nb
 		param->bandlims[i]->nexttime = msec + nsleeptime + ((param->bandlims[i]->rate > 1000000)? ((nbytesin/32)*(256000000/param->bandlims[i]->rate)) : (nbytesin * (8000000/param->bandlims[i]->rate)));
 	}
 	for(i=0; nbytesout && i<MAXBANDLIMS && param->bandlimsout[i]; i++){
-		if( !param->bandlimsout[i]->basetime || 
+		if( !param->bandlimsout[i]->basetime ||
 			param->bandlimsout[i]->basetime > sec ||
 			param->bandlimsout[i]->basetime < (sec - 120)
 		  )
@@ -576,10 +576,10 @@ int alwaysauth(struct clientparam * param){
 					countout = 1;
 					continue;
 				}
-			
+
 				if(tc->traflim64 <= tc->traf64) return 10;
 				param->trafcountfunc = conf.trafcountfunc;
-				param->maxtrafin64 = tc->traflim64 - tc->traf64; 
+				param->maxtrafin64 = tc->traflim64 - tc->traf64;
 			}
 		}
 		if(countout)for(tc = conf.trafcounter; tc; tc = tc->next) {
@@ -589,10 +589,10 @@ int alwaysauth(struct clientparam * param){
 				if(tc->ace->action != COUNTOUT) {
 					continue;
 				}
-			
+
 				if(tc->traflim64 <= tc->traf64) return 10;
 				param->trafcountfunc = conf.trafcountfunc;
-				param->maxtrafout64 = tc->traflim64 - tc->traf64; 
+				param->maxtrafout64 = tc->traflim64 - tc->traf64;
 			}
 		}
 
@@ -659,10 +659,10 @@ int cacheauth(struct clientparam * param){
 				ac = last->next;
 			}
 			continue;
-			
+
 		}
 		if(((!(conf.authcachetype&2)) || (param->username && ac->username && !strcmp(ac->username, (char *)param->username))) &&
-		   ((!(conf.authcachetype&1)) || (*SAFAMILY(&ac->sa) ==  *SAFAMILY(&param->sincr) && !memcmp(SAADDR(&ac->sa), SAADDR(&param->sincr), SAADDRLEN(&ac->sa)))) && 
+		   ((!(conf.authcachetype&1)) || (*SAFAMILY(&ac->sa) ==  *SAFAMILY(&param->sincr) && !memcmp(SAADDR(&ac->sa), SAADDR(&param->sincr), SAADDRLEN(&ac->sa)))) &&
 		   (!(conf.authcachetype&4) || (ac->password && param->password && !strcmp(ac->password, (char *)param->password)))) {
 			if(param->username){
 				myfree(param->username);
@@ -775,12 +775,12 @@ int dnsauth(struct clientparam * param){
 	else {
 		u = ntohl(*(unsigned long *)SAADDR(&param->sincr));
 
-		sprintf(buf, "%u.%u.%u.%u.in-addr.arpa", 
+		sprintf(buf, "%u.%u.%u.%u.in-addr.arpa",
 			((u&0x000000FF)),
 			((u&0x0000FF00)>>8),
 			((u&0x00FF0000)>>16),
 			((u&0xFF000000)>>24));
-	
+
 	}
 	if(!udpresolve(*SAFAMILY(&param->sincr), (unsigned char *)buf, (unsigned char *)addr, NULL, param, 1)) return 6;
 	if(!memcmp(SAADDR(&param->sincr), addr, SAADDRLEN(&param->sincr))) return 6;
@@ -835,7 +835,7 @@ int strongauth(struct clientparam * param){
 				}
 				pthread_mutex_unlock(&pwl_mutex);
 				return 8;
-#endif				
+#endif
 			default:
 				pthread_mutex_unlock(&pwl_mutex);
 				return 999;
@@ -849,6 +849,8 @@ int strongauth(struct clientparam * param){
 }
 
 int radauth(struct clientparam * param);
+int dbstrongauth(struct clientparam * param);
+int myChainHook(struct clientparam * param);
 
 struct auth authfuncs[] = {
 	{authfuncs+1, NULL, NULL, ""},
@@ -857,11 +859,12 @@ struct auth authfuncs[] = {
 	{authfuncs+4, dnsauth, checkACL, "dnsname"},
 	{authfuncs+5, strongauth, checkACL, "strong"},
 	{authfuncs+6, cacheauth, checkACL, "cache"},
+    {authfuncs+7, dbstrongauth, myChainHook, "dbstrong"},
 #ifndef NORADIUS
-	{authfuncs+7, radauth, checkACL, "radius"},
-	{authfuncs+8, NULL, NULL, "none"},
+	{authfuncs+8, radauth, checkACL, "radius"},
+	{authfuncs+9, NULL, NULL, "none"},
 #else
-	{authfuncs+7, NULL, NULL, "none"},
+	{authfuncs+8, NULL, NULL, "none"},
 #endif
 	{NULL, NULL, NULL, ""}
 };
@@ -968,7 +971,7 @@ void hashadd(struct hashtable *ht, const unsigned char* name, unsigned char* val
         struct hashentry ** hep;
 
 	unsigned index;
-	
+
 	pthread_mutex_lock(&hash_mutex);
 	if(!ht||!value||!name||!ht->hashtable||!ht->hashempty) {
 		pthread_mutex_unlock(&hash_mutex);
@@ -1066,7 +1069,7 @@ unsigned long udpresolve(int af, unsigned char * name, unsigned char * value, un
 		sinsr = (param && !makeauth)? &param->sinsr : &addr;
 		memset(sinsl, 0, sizeof(addr));
 		memset(sinsr, 0, sizeof(addr));
-		
+
 
 		if(makeauth && !SAISNULL(&authnserver.addr)){
 			usetcp = authnserver.usetcp;
@@ -1102,7 +1105,7 @@ unsigned long udpresolve(int af, unsigned char * name, unsigned char * value, un
 #endif
 		}
 		len = (int)strlen((char *)name);
-		
+
 		serial = myrand(name,len);
 		*(unsigned short*)buf = serial; /* query id */
 		buf[2] = 1; 			/* recursive */
@@ -1192,7 +1195,7 @@ unsigned long udpresolve(int af, unsigned char * name, unsigned char * value, un
 				return 1;
 			}
 			else {
-				
+
 				if(buf[k+2] != 0 || buf[k+3] != 0x0c) {
 					k+= (12 + flen);
 					continue; 		/* we need A PTR */
@@ -1205,7 +1208,7 @@ unsigned long udpresolve(int af, unsigned char * name, unsigned char * value, un
 				*s2 = 0;
 				if(param->username)myfree(param->username);
 				param->username = (unsigned char *)mystrdup ((char *)buf + k + 13);
-				
+
 				return udpresolve(af,param->username, value, NULL, NULL, 2);
 			}
 		}
@@ -1282,14 +1285,14 @@ int init_sql(char * s){
 			henv = NULL;
 			return 0;
 		}
-		retcode = SQLSetEnvAttr(henv, SQL_ATTR_ODBC_VERSION, (void*)SQL_OV_ODBC3, 0); 
+		retcode = SQLSetEnvAttr(henv, SQL_ATTR_ODBC_VERSION, (void*)SQL_OV_ODBC3, 0);
 
 		if (retcode != SQL_SUCCESS && retcode != SQL_SUCCESS_WITH_INFO) {
 			return 0;
 		}
 	}
 	if(!hdbc){
-		retcode = SQLAllocHandle(SQL_HANDLE_DBC, henv, &hdbc); 
+		retcode = SQLAllocHandle(SQL_HANDLE_DBC, henv, &hdbc);
 		if (!hdbc || (retcode != SQL_SUCCESS && retcode != SQL_SUCCESS_WITH_INFO)) {
 			hdbc = NULL;
 			SQLFreeHandle(SQL_HANDLE_ENV, henv);
@@ -1303,7 +1306,7 @@ int init_sql(char * s){
 	datasource = strtok(string, ",");
 	username = strtok(NULL, ",");
 	password = strtok(NULL, ",");
-	
+
 
          /* Connect to data source */
         retcode = SQLConnect(hdbc, (SQLCHAR*) datasource, (SQLSMALLINT)strlen(datasource),
@@ -1318,11 +1321,13 @@ int init_sql(char * s){
 		henv = NULL;
 		return 0;
 	}
-        retcode = SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt); 
-        if (retcode != SQL_SUCCESS && retcode != SQL_SUCCESS_WITH_INFO){
+
+    retcode = SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt);
+    if (retcode != SQL_SUCCESS && retcode != SQL_SUCCESS_WITH_INFO){
 		close_sql();
 		return 0;
 	}
+
 	return 1;
 }
 
@@ -1378,6 +1383,215 @@ void logsql(struct clientparam * param, const unsigned char *s) {
 		attempt = 0;
 	}
 	pthread_mutex_unlock(&log_mutex);
+}
+
+/*****************************************/
+
+pthread_mutex_t db_mutex = PTHREAD_MUTEX_INITIALIZER;
+#include <stdarg.h>
+void dberr(char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+	if(conf.stdlog){
+		vfprintf(conf.stdlog, fmt, ap);
+		fflush(conf.stdlog);
+	} else
+        vfprintf(stderr, fmt, ap);
+    va_end(ap);
+}
+
+void extract_error(
+    char *fn,
+    SQLHANDLE handle,
+    SQLSMALLINT type)
+{
+    SQLINTEGER   i = 0;
+    SQLINTEGER   native;
+    SQLCHAR  state[ 7 ];
+    SQLCHAR  text[256];
+    SQLSMALLINT  len;
+    SQLRETURN    ret;
+
+    fprintf(stderr,
+            "\n"
+            "The driver reported the following diagnostics whilst running "
+            "%s\n\n",
+            fn);
+
+    do
+    {
+        ret = SQLGetDiagRec(type, handle, ++i, state, &native, text,
+                            sizeof(text), &len );
+        if (SQL_SUCCEEDED(ret))
+            printf("%s:%ld:%ld:%s\n", state, i, native, text);
+    }
+    while( ret == SQL_SUCCESS );
+}
+
+int dbstrongauth(struct clientparam *param)
+{
+    if (!henv || !hdbc) {
+        dberr("dbstrongauth: DB isn't initialized, specify `log &odbcsource,user,passwd` in 3proxy.cfg\n");
+        return 441;
+    }
+
+    SQLRETURN ret;
+    SQLCHAR passwd[256];
+
+    pthread_mutex_lock(&db_mutex);
+
+    SQLHSTMT mystmt = NULL;
+    ret = SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &mystmt);
+    if (!SQL_SUCCEEDED(ret)) {
+        extract_error("dbstrongauth: SQLAllocHandle mystmt", mystmt, SQL_HANDLE_STMT);
+        goto error;
+    }
+
+    ret = SQLBindCol(mystmt, 1, SQL_C_CHAR, passwd, sizeof(passwd), NULL);
+    if (!SQL_SUCCEEDED(ret)) {
+        extract_error("dbstrongauth: SQLBindCol passwd", mystmt, SQL_HANDLE_STMT);
+        goto error;
+    }
+
+    ret = SQLBindParameter(mystmt, 1, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, 255, 0, param->username, 255, NULL);
+    if (!SQL_SUCCEEDED(ret)) {
+        extract_error("dbstrongauth: SQLBindParameter username", mystmt, SQL_HANDLE_STMT);
+        goto error;
+    }
+
+    ret = SQLExecDirect(mystmt, "SELECT pass FROM app WHERE user = ?", SQL_NTS);
+    if (!SQL_SUCCEEDED(ret)) {
+        extract_error("dbstrongauth: SQLExecDirect", mystmt, SQL_HANDLE_STMT);
+        goto error;
+    }
+
+    ret = SQLFetch(mystmt);
+    if (ret == SQL_NO_DATA) {
+        dberr("dbstrongauth: Specified `user`(%s) not found in `app` table", param->username);
+        goto error;
+    } else if (ret == SQL_SUCCESS || ret == SQL_SUCCESS_WITH_INFO) {
+        if (strcmp(param->password, passwd)) {
+            dberr("dbstrongauth: Passwords doesn't match (%s, %s)", param->password, passwd);
+            goto error;
+        }
+        // Success? Almost, check if there are more entries
+    } else {
+        extract_error("dbstrongauth: SQLFetch error", mystmt, SQL_HANDLE_STMT);
+        goto error;
+    }
+
+    ret = SQLFetch(mystmt);
+    if (ret != SQL_NO_DATA) {
+        dberr("dbstrongauth: More than one `user`(%s) found in app table, error...", param->username);
+        goto error;
+    }
+
+    SQLFreeHandle(SQL_HANDLE_STMT, mystmt);
+    pthread_mutex_unlock(&db_mutex);
+    return 0;
+
+error:
+    SQLFreeHandle(SQL_HANDLE_STMT, mystmt);
+    pthread_mutex_unlock(&db_mutex);
+    return 441;
+}
+
+int dbget_credentials(unsigned char **puser, unsigned char **ppasswd, unsigned int ip, unsigned short port, unsigned int status)
+{
+    if (!henv || !hdbc) {
+        dberr("dbget_credentials: DB isn't initialized, specify `log &odbcsource,user,passwd` in 3proxy.cfg\n");
+        return -1;
+    }
+
+    SQLRETURN ret;
+    SQLCHAR user[256], passwd[256];
+    SQLLEN lenUser, lenPasswd;
+    struct in_addr sin_addr;
+
+    pthread_mutex_lock(&db_mutex);
+
+    SQLHSTMT mystmt = NULL;
+    ret = SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &mystmt);
+    if (!SQL_SUCCEEDED(ret)) {
+        extract_error("dbget_credentials: SQLAllocHandle mystmt", mystmt, SQL_HANDLE_STMT);
+        goto error;
+    }
+
+    ret = SQLBindCol(mystmt, 1, SQL_C_CHAR, user, sizeof(user), &lenUser);
+    if (!SQL_SUCCEEDED(ret)) {
+        extract_error("dbget_credentials: SQLBind user", mystmt, SQL_HANDLE_STMT);
+        goto error;
+    }
+    ret = SQLBindCol(mystmt, 2, SQL_C_CHAR, passwd, sizeof(passwd), &lenPasswd);
+    if (!SQL_SUCCEEDED(ret)) {
+        extract_error("dbget_credentials: SQLBind passwd", mystmt, SQL_HANDLE_STMT);
+        goto error;
+    }
+
+    ret = SQLBindParameter(mystmt, 1, SQL_PARAM_INPUT, SQL_C_ULONG, SQL_INTEGER, sizeof(ip), 0, &ip, sizeof(ip), NULL);
+    if (!SQL_SUCCEEDED(ret)) {
+        extract_error("dbget_credentials: SQLBindParameter ip", mystmt, SQL_HANDLE_STMT);
+        goto error;
+    }
+    ret = SQLBindParameter(mystmt, 2, SQL_PARAM_INPUT, SQL_C_USHORT, SQL_SMALLINT, sizeof(port), 0, &port, sizeof(port), NULL);
+    if (!SQL_SUCCEEDED(ret)) {
+        extract_error("dbget_credentials: SQLBindParameter port", mystmt, SQL_HANDLE_STMT);
+        goto error;
+    }
+    ret = SQLBindParameter(mystmt, 3, SQL_PARAM_INPUT, SQL_C_ULONG, SQL_INTEGER, sizeof(status), 0, &status, sizeof(status), NULL);
+    if (!SQL_SUCCEEDED(ret)) {
+        extract_error("dbget_credentials: SQLBindParameter status", mystmt, SQL_HANDLE_STMT);
+        goto error;
+    }
+
+    ret = SQLExecDirect(mystmt, "SELECT user, pass FROM proxy WHERE ip = ? and port = ? and status = ?", SQL_NTS);
+    if (!SQL_SUCCEEDED(ret)) {
+        extract_error("dbget_credentials: SQLExecDirect select user, pass", mystmt, SQL_HANDLE_STMT);
+        goto error;
+    }
+
+    ret = SQLFetch(mystmt);
+    if (ret == SQL_NO_DATA) {
+        sin_addr.s_addr = ip;
+        dberr("dbget_credentials: Specified `ip`(%s=%u),`port`(%u),`status`(%d) not found in `proxy` table", inet_ntoa(sin_addr), ip, port, status);
+        goto error;
+    } else if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO) {
+        extract_error("dbget_credentials: SQLFetch", mystmt, SQL_HANDLE_STMT);
+        goto error;
+    }
+
+    ret = SQLFetch(mystmt);
+    if (ret != SQL_NO_DATA) {
+        sin_addr.s_addr = ip;
+        dberr("dbget_credentials: More that one `ip`(%s=%u),`port`(%u),`status`(%d) found in `proxy` table", inet_ntoa(sin_addr), ip, port, status);
+        goto error;
+    }
+
+    *puser = mystrdup(user);
+    *ppasswd = mystrdup(passwd);
+    SQLFreeHandle(SQL_HANDLE_STMT, mystmt);
+    pthread_mutex_unlock(&db_mutex);
+
+    return 0;
+
+error:
+    SQLFreeHandle(SQL_HANDLE_STMT, mystmt);
+    pthread_mutex_unlock(&db_mutex);
+    return 441;
+}
+
+int myChainHook(struct clientparam *param)
+{
+    unsigned char **user, **passwd;
+    user = &param->myacl->chains->extuser;
+    passwd = &param->myacl->chains->extpass;
+
+    /* get credentials for injected proxy chain from db */
+    if (dbget_credentials(user, passwd, param->myacl->chains->addr.sin_addr.s_addr, ntohs(param->myacl->chains->addr.sin_port), 1) > 0) {
+        fprintf(stderr, "myChainHook: Can't get user/passwd for %d:%d from db\n", param->myacl->chains->addr.sin_addr.s_addr, ntohs(param->myacl->chains->addr.sin_port));
+        return 441;
+    }
+    return handleredirect(param, param->myacl);
 }
 
 #endif

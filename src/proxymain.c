@@ -923,6 +923,7 @@ void freeparam(struct clientparam * param) {
 	if(param->res == 2) return;
 	if(param->datfilterssrv) myfree(param->datfilterssrv);
 #ifndef STDMAIN
+    if(param->myacl) freeacl(param->myacl);
 	if(param->reqfilters) myfree(param->reqfilters);
 	if(param->hdrfilterscli) myfree(param->hdrfilterscli);
 	if(param->hdrfilterssrv) myfree(param->hdrfilterssrv);

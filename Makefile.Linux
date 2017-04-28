@@ -10,7 +10,9 @@
 BUILDDIR =
 CC = gcc
 
-CFLAGS = -g -O2 -c -pthread -DWITHSPLICE -DGETHOSTBYNAME_R -D_THREAD_SAFE -D_REENTRANT -DNOODBC -DWITH_STD_MALLOC -DFD_SETSIZE=4096 -DWITH_POLL
+# CFLAGS = -g -O2 -c -pthread -DWITHSPLICE -DGETHOSTBYNAME_R -D_THREAD_SAFE -D_REENTRANT -DNOODBC -DWITH_STD_MALLOC -DFD_SETSIZE=4096 -DWITH_POLL
+# This one is with ODBC support
+CFLAGS = -g -O0 -c -pthread -DWITHSPLICE -DGETHOSTBYNAME_R -D_THREAD_SAFE -D_REENTRANT -DWITH_STD_MALLOC -DFD_SETSIZE=4096 -DWITH_POLL -DNOIPV6
 COUT = -o 
 LN = gcc
 DCFLAGS = -fpic
@@ -32,7 +34,7 @@ MAKEFILE = Makefile.Linux
 # PamAuth requires libpam, you may require pam-devel package to be installed
 # SSLPlugin requires  -lcrypto -lssl
 #LIBS = -lcrypto -lssl -ldl 
-LIBS = -ldl 
+LIBS = -ldl -lodbc
 #PLUGINS = SSLPlugin StringsPlugin TrafficPlugin PCREPlugin TransparentPlugin PamAuth
 PLUGINS = StringsPlugin TrafficPlugin PCREPlugin TransparentPlugin
 

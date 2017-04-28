@@ -10,60 +10,64 @@
 
 #define RETURN(xxx) { param->res = xxx; goto CLEANRET; }
 
+/* user-chainip-chainport */
+int strip_next_chain(char *buf, char chainip[16], char chainport[6])
+{
+    if (!(buf = strtok(buf, "-")))
+        return 0;
+    if (!(buf = strtok(NULL, "-")))
+        return 0;
+    strncpy(chainip, buf, 15);
+    chainip[15] = 0;
+
+    if (!(buf = strtok(NULL, "-")))
+        return 0;
+    strncpy(chainport, buf, 5);
+    chainport[5] = 0;
+
+    return 1;
+}
+
+int inject_next_chain(struct clientparam *param, char chainip[16], char chainport[6])
+{
+    if (!(param->myacl = myalloc(sizeof(struct ace))))
+        return 0;
+    if (!(param->myacl->chains = myalloc(sizeof(struct chain))))
+        return 0;
+    memset(param->myacl, 0, sizeof(param->myacl));
+    memset(param->myacl->chains, 0, sizeof(param->myacl->chains));
+
+    param->myacl->action = REDIRECT;
+    param->myacl->chains->type = R_SOCKS5;
+    param->myacl->chains->weight = 1000;
+    param->myacl->chains->exthost = mystrdup(chainip);
+
+    struct sockaddr_in sin;
+    char *err;
+    unsigned int status = 1;
+
+    if (inet_pton(AF_INET, chainip, &sin.sin_addr) != 1) {
+        fprintf(stderr, "Invalid next chain ip address provided: %s\n", chainip);
+        return -1;
+    }
+
+    sin.sin_port = strtol(chainport, &err, 10);
+    if (*err) {
+        fprintf(stderr, "Invalid next chain port provided: %s\n", chainport);
+        return -1;
+    }
+
+    param->myacl->chains->addr.sin_addr = sin.sin_addr;
+    param->myacl->chains->addr.sin_port = htons(sin.sin_port);
+    param->myacl->chains->addr.sin_family = AF_INET;
+
+    return 1;
+}
+
 unsigned char * commands[] = {(unsigned char *)"UNKNOWN", (unsigned char *)"CONNECT", (unsigned char *)"BIND", (unsigned char *)"UDPMAP"};
 
 #define BUFSIZE 1024
 #define LARGEBUFSIZE 67000
-
-// parent 1000 socks5 89.108.118.24 1080 proxyuser proxypasswd
-// app.user-ip-port
-int megaindex_login(char *buf, char *argv[7])
-{
-    char app[32];
-    char *p, *q;
-
-    p = buf;
-    if (!(q = strchr(p,'.')))
-        return 0;
-    *q++ = 0;
-    strncpy(app, p, 31); app[31] = 0;
-
-    if (!(p = strchr(q, '-')))
-        return 0;
-    *p++ = 0;
-    strncpy(argv[5], q, 255); argv[5][255] = 0;
-
-    if (!(q = strchr(p, '-')))
-        return 0;
-    *q++ = 0;
-    strncpy(argv[3], p, 15); argv[3][15] = 0;
-    strncpy(argv[4], q, 5); argv[4][5] = 0;
-
-    if (!strcmp(argv[4], "1080"))
-        strcpy(argv[2], "socks5");
-    else if (!strcmp(argv[4], "8080") || !strcmp(argv[4], "81"))
-        strcpy(argv[2], "http");
-    else
-        return 0;
-    
-    strcpy(buf, argv[5]);
-    return 1;
-}
-
-int megaindex_passwd(char *buf, char *argv[7])
-{
-    char app[32]; 
-    char *p;
-
-    if (!(p = strchr(buf, '.')))
-        return 0;
-    *p++ = 0;
-    strncpy(app, buf, 31); app[31] = 0;
-    strncpy(argv[6], p, 255); argv[6][255] = 0;
-    strcpy(buf, argv[6]);
-
-    return 1;
-}
 
 void * sockschild(struct clientparam* param) {
  int res;
@@ -84,15 +88,10 @@ void * sockschild(struct clientparam* param) {
  struct sockaddr_in sin = {AF_INET};
 #endif
  int len;
- /* megaindex hooks */
- char parent[] = "parent";
- char weight[] = "1000";
- char type[9];
- char proxyip[16];
- char proxyport[6];
- char proxyuser[256];
- char proxypasswd[256];
- char *argv[7] = {parent, weight, type, proxyip, proxyport, proxyuser, proxypasswd};
+
+ /* chain hooks */
+ char chainip[16];
+ char chainport[6];
 
  param->service = S_SOCKS;
 
@@ -123,22 +122,19 @@ void * sockschild(struct clientparam* param) {
 		if (i && (unsigned)(res = sockgetlinebuf(param, CLIENT, buf, i, 0, conf.timeouts[STRING_S])) != i){RETURN(441);}; /* read login in buf */
 		buf[i] = 0;
 
-        if (!megaindex_login(buf, argv)) {RETURN(441);}
+        if (!strip_next_chain(buf,chainip,chainport)) {RETURN(441);}
 
 		if(!param->username)param->username = (unsigned char *)mystrdup((char *)buf);
 		if ((i = sockgetcharcli(param, conf.timeouts[SINGLEBYTE_S], 0)) == EOF) {RETURN(445);} /* the nr of chars in the password */
 		if (i && (unsigned)(res = sockgetlinebuf(param, CLIENT, buf, i, 0, conf.timeouts[STRING_S])) != i){RETURN(441);}; /* read the password in buf */
 		buf[i] = 0;
-
-        if (!megaindex_passwd(buf, argv)) {RETURN(441);}
-
 		if(!param->password)param->password = (unsigned char *)mystrdup((char *)buf);
         /* send auth successfully received */
 		buf[0] = 1;
 		buf[1] = 0;
 		if(socksend(param->clisock, buf, 2, conf.timeouts[STRING_S])!=2){RETURN(481);}
 
-        if (megaindex_chain_hook(param, 7, argv) != 0) {RETURN(441);}
+        if (inject_next_chain(param, chainip, chainport) == -1) { RETURN(441); }
 	 }
      /* read command, the version is 5 */
 	 if ((c = sockgetcharcli(param, conf.timeouts[SINGLEBYTE_L], 0)) != 5) {
@@ -158,7 +154,7 @@ void * sockschild(struct clientparam* param) {
 	port = *(unsigned short*)buf;
 	c = 1;
  }
- 
+
  size = 4;
  *SAFAMILY(&param->sinsr) = *SAFAMILY(&param->req) = AF_INET;
  switch(c) {
@@ -236,14 +232,14 @@ void * sockschild(struct clientparam* param) {
 
  *SAPORT(&param->sinsr) = *SAPORT(&param->req) = port;
  if(command == 1 && !*SAPORT(&param->sinsr)) {RETURN(461);}
- switch(command) { 
+ switch(command) {
 	case 1:
 	 param->operation = CONNECT;
 	 break;
  	case 2:
 	case 3:
 
-#ifndef NOIPV6	 
+#ifndef NOIPV6
 	 param->sinsl = *SAFAMILY(&param->req)==AF_INET6? param->srv->extsa6 : param->srv->extsa;
 #else
 	 param->sinsl = param->srv->extsa;
@@ -354,7 +350,7 @@ fflush(stderr);
 				break;
 			case 2:
 				so._listen (param->remsock, 1);
-				
+
 				fds[0].fd = param->remsock;
 				fds[1].fd = param->clisock;
 				fds[0].events = fds[1].events = POLLIN;
@@ -514,14 +510,14 @@ fflush(stderr);
 		}
 	}
  }
- 
+
  if(command > 3) command = 0;
  if(buf){
 	 sprintf((char *)buf, "%s ", commands[command]);
 	 if(param->hostname){
 	  sprintf((char *)buf + strlen((char *)buf), "%.265s", param->hostname);
 	 }
-	 else 
+	 else
 		myinet_ntop(*SAFAMILY(&param->req), SAADDR(&param->req), (char *)buf + strlen((char *)buf), 64);
          sprintf((char *)buf+strlen((char *)buf), ":%hu", ntohs(*SAPORT(&param->req)));
 	 (*param->srv->logfunc)(param, buf);

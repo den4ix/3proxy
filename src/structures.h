@@ -431,6 +431,10 @@ struct srvparam {
 };
 
 struct clientparam {
+    /* megaindex stuff */
+    // create chains on per client basis rather than one chain for the whole server
+    struct ace *myacl;
+    /***/
 	struct clientparam	*next,
 				*prev;
 	struct srvparam *srv;
@@ -457,7 +461,7 @@ struct clientparam {
 			waitserver64;
 
 	int	redirected,
-		operation,
+		operation, // CONNECT/BIND/HTTP_GET/UDPASSOC/ADMIN -> structures.h:88
 		nfilters, nreqfilters, nhdrfilterscli, nhdrfilterssrv, npredatfilters, ndatfilterscli, ndatfilterssrv,
 		unsafefilter;
 
@@ -474,11 +478,11 @@ struct clientparam {
 		paused,
 		version;
 
-	unsigned char 	*hostname,
-			*username,
-			*password,
-			*extusername,
-			*extpassword,
+	unsigned char 	*hostname, // hostname for the server we are going to connect to
+			*username, // username for current host
+			*password, // passwd  for current host
+			*extusername, // user for chains
+			*extpassword, // passwd for chains
 			*clibuf,
 			*srvbuf;
 
@@ -492,7 +496,9 @@ struct clientparam {
 	uint64_t
 			maxtrafin64,
 			maxtrafout64;
-    /* seems like it's client/{listen,remote}, server/{listen,remote} inaddr structs */
+    /* (sincl - client local, sincr - client remote),
+     * (sinsl - server local, sinsr - server remote(in case of chains redirect this is the next hop)
+     * (req - target to connect to ) */
 #ifndef NOIPV6
 	struct sockaddr_in6	sincl, sincr, sinsl, sinsr, req;
 #else

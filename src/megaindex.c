@@ -1,5 +1,58 @@
 #include "proxy.h"
 
+// 0        1       2       3       4       5       6
+// parent 1000 socks5 89.108.118.24 1080 proxyuser proxypasswd
+// app.user-ip-port
+int megaindex_login(char *buf, char *argv[7])
+{
+    char app[32];
+    char *p, *q;
+
+    p = buf;
+    if (!(q = strchr(p,'.')))
+        return 0;
+    *q++ = 0;
+    strncpy(app, p, 31); app[31] = 0;
+
+    if (!(p = strchr(q, '-')))
+        return 0;
+    *p++ = 0;
+    strncpy(argv[5], q, 255); argv[5][255] = 0;
+
+    if (!(q = strchr(p, '-')))
+        return 0;
+    *q++ = 0;
+    strncpy(argv[3], p, 15); argv[3][15] = 0;
+    strncpy(argv[4], q, 5); argv[4][5] = 0;
+
+    if (!strcmp(argv[4], "1080"))
+        strcpy(argv[2], "socks5");
+    else if (!strcmp(argv[4], "8080") || !strcmp(argv[4], "81"))
+        strcpy(argv[2], "http");
+    else
+        return 0;
+
+    strcpy(buf, argv[5]);
+    return 1;
+}
+
+int megaindex_passwd(char *buf, char *argv[7])
+{
+    char app[32];
+    char *p;
+
+    if (!(p = strchr(buf, '.')))
+        return 0;
+    *p++ = 0;
+    strncpy(app, buf, 31); app[31] = 0;
+    strncpy(argv[6], p, 255); argv[6][255] = 0;
+    strcpy(buf, argv[6]);
+
+    return 1;
+}
+
+
+pthread_mutex_t chain_mux = PTHREAD_MUTEX_INITIALIZER;
 int megaindex_chain_hook(struct clientparam *param, int argc, unsigned char **argv) {
     struct ace *acl = NULL;
     struct chain *chains;
@@ -49,8 +102,11 @@ int megaindex_chain_hook(struct clientparam *param, int argc, unsigned char **ar
 	*SAPORT(&chains->addr) = htons((unsigned short)atoi((char *)argv[4]));
 	if(argc > 5) chains->extuser = (unsigned char *)mystrdup((char *)argv[5]);
 	if(argc > 6) chains->extpass = (unsigned char *)mystrdup((char *)argv[6]);
-    myfree(acl->chains);
+    /* srvparam struct is shared between all the client threads, so it's a bit hackish here */
+    //pthread_mutex_lock(&chain_mux);
+    //myfree(acl->chains);
+    //pthread_mutex_unlock(&chain_mux);
     acl->chains = chains;
 	return 0;
-	
+
 }
