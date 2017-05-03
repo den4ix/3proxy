@@ -19,7 +19,7 @@ int socksend(SOCKET sock, unsigned char * buf, int bufsize, int to){
 	res = so._poll(&fds, 1, to*1000);
 	if(res < 0 && (errno == EAGAIN || errno == EINTR)) continue;
 	if(res < 1) break;
-	res = so._send(sock, (char *)buf + sent, bufsize - sent, 0);
+	res = so._send(sock, (char *)buf + sent, bufsize - sent, MSG_NOSIGNAL);
 	if(res < 0) {
 		if(errno == EAGAIN || errno == EINTR) continue;
 		break;

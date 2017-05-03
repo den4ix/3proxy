@@ -1387,7 +1387,7 @@ void logsql(struct clientparam * param, const unsigned char *s) {
 
 /*****************************************/
 
-pthread_mutex_t db_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
 #include <stdarg.h>
 void dberr(char *fmt, ...) {
     va_list ap;
@@ -1435,16 +1435,17 @@ int dbstrongauth(struct clientparam *param)
         return 441;
     }
 
+    SQLHSTMT mystmt = NULL;
     SQLRETURN ret;
     SQLCHAR passwd[256];
 
-    pthread_mutex_lock(&db_mutex);
+    pthread_mutex_lock(&log_mutex);
 
-    SQLHSTMT mystmt = NULL;
     ret = SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &mystmt);
     if (!SQL_SUCCEEDED(ret)) {
         extract_error("dbstrongauth: SQLAllocHandle mystmt", mystmt, SQL_HANDLE_STMT);
-        goto error;
+        pthread_mutex_unlock(&log_mutex);
+        return 441;
     }
 
     ret = SQLBindCol(mystmt, 1, SQL_C_CHAR, passwd, sizeof(passwd), NULL);
@@ -1467,11 +1468,11 @@ int dbstrongauth(struct clientparam *param)
 
     ret = SQLFetch(mystmt);
     if (ret == SQL_NO_DATA) {
-        dberr("dbstrongauth: Specified `user`(%s) not found in `app` table", param->username);
+        dberr("dbstrongauth: Specified `user`(%s) not found in `app` table\n", param->username);
         goto error;
     } else if (ret == SQL_SUCCESS || ret == SQL_SUCCESS_WITH_INFO) {
         if (strcmp(param->password, passwd)) {
-            dberr("dbstrongauth: Passwords doesn't match (%s, %s)", param->password, passwd);
+            dberr("dbstrongauth: Passwords doesn't match (%s, %s)\n", param->password, passwd);
             goto error;
         }
         // Success? Almost, check if there are more entries
@@ -1482,17 +1483,17 @@ int dbstrongauth(struct clientparam *param)
 
     ret = SQLFetch(mystmt);
     if (ret != SQL_NO_DATA) {
-        dberr("dbstrongauth: More than one `user`(%s) found in app table, error...", param->username);
+        dberr("dbstrongauth: More than one `user`(%s) found in app table, error...\n", param->username);
         goto error;
     }
 
     SQLFreeHandle(SQL_HANDLE_STMT, mystmt);
-    pthread_mutex_unlock(&db_mutex);
+    pthread_mutex_unlock(&log_mutex);
     return 0;
 
 error:
     SQLFreeHandle(SQL_HANDLE_STMT, mystmt);
-    pthread_mutex_unlock(&db_mutex);
+    pthread_mutex_unlock(&log_mutex);
     return 441;
 }
 
@@ -1503,18 +1504,19 @@ int dbget_credentials(unsigned char **puser, unsigned char **ppasswd, unsigned i
         return -1;
     }
 
+    SQLHSTMT mystmt = NULL;
     SQLRETURN ret;
     SQLCHAR user[256], passwd[256];
     SQLLEN lenUser, lenPasswd;
     struct in_addr sin_addr;
 
-    pthread_mutex_lock(&db_mutex);
+    pthread_mutex_lock(&log_mutex);
 
-    SQLHSTMT mystmt = NULL;
     ret = SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &mystmt);
     if (!SQL_SUCCEEDED(ret)) {
         extract_error("dbget_credentials: SQLAllocHandle mystmt", mystmt, SQL_HANDLE_STMT);
-        goto error;
+        pthread_mutex_unlock(&log_mutex);
+        return 441;
     }
 
     ret = SQLBindCol(mystmt, 1, SQL_C_CHAR, user, sizeof(user), &lenUser);
@@ -1553,7 +1555,7 @@ int dbget_credentials(unsigned char **puser, unsigned char **ppasswd, unsigned i
     ret = SQLFetch(mystmt);
     if (ret == SQL_NO_DATA) {
         sin_addr.s_addr = ip;
-        dberr("dbget_credentials: Specified `ip`(%s=%u),`port`(%u),`status`(%d) not found in `proxy` table", inet_ntoa(sin_addr), ip, port, status);
+        dberr("dbget_credentials: Specified `ip`(%s=%u),`port`(%u),`status`(%d) not found in `proxy` table\n", inet_ntoa(sin_addr), ip, port, status);
         goto error;
     } else if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO) {
         extract_error("dbget_credentials: SQLFetch", mystmt, SQL_HANDLE_STMT);
@@ -1563,35 +1565,47 @@ int dbget_credentials(unsigned char **puser, unsigned char **ppasswd, unsigned i
     ret = SQLFetch(mystmt);
     if (ret != SQL_NO_DATA) {
         sin_addr.s_addr = ip;
-        dberr("dbget_credentials: More that one `ip`(%s=%u),`port`(%u),`status`(%d) found in `proxy` table", inet_ntoa(sin_addr), ip, port, status);
+        dberr("dbget_credentials: More that one `ip`(%s=%u),`port`(%u),`status`(%d) found in `proxy` table\n", inet_ntoa(sin_addr), ip, port, status);
         goto error;
     }
 
     *puser = mystrdup(user);
     *ppasswd = mystrdup(passwd);
     SQLFreeHandle(SQL_HANDLE_STMT, mystmt);
-    pthread_mutex_unlock(&db_mutex);
+    pthread_mutex_unlock(&log_mutex);
 
     return 0;
 
 error:
     SQLFreeHandle(SQL_HANDLE_STMT, mystmt);
-    pthread_mutex_unlock(&db_mutex);
+    pthread_mutex_unlock(&log_mutex);
     return 441;
 }
 
 int myChainHook(struct clientparam *param)
 {
     unsigned char **user, **passwd;
+    unsigned int ip;
+    unsigned short port;
     user = &param->myacl->chains->extuser;
     passwd = &param->myacl->chains->extpass;
 
+#ifndef NOIPV6
+    ip = param->myacl->chains->addr.sin_addr6.s6_addr;
+    port = ntohs(param->myacl->chains->addr.sin6_port);
+#else
+    ip = param->myacl->chains->addr.sin_addr.s_addr;
+    port = ntohs(param->myacl->chains->addr.sin_port);
+#endif
+
     /* get credentials for injected proxy chain from db */
-    if (dbget_credentials(user, passwd, param->myacl->chains->addr.sin_addr.s_addr, ntohs(param->myacl->chains->addr.sin_port), 1) > 0) {
-        fprintf(stderr, "myChainHook: Can't get user/passwd for %d:%d from db\n", param->myacl->chains->addr.sin_addr.s_addr, ntohs(param->myacl->chains->addr.sin_port));
+    if (dbget_credentials(user, passwd, ip, port, 1) > 0) {
+        fprintf(stderr, "myChainHook: Can't get user/passwd for %d:%d from db\n", ip, port);
         return 441;
     }
-    return handleredirect(param, param->myacl);
+    struct ace dup;
+    dup = *param->myacl;
+    return handleredirect(param, &dup);
 }
 
 #endif

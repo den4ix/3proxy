@@ -252,6 +252,7 @@ struct ace * copyacl (struct ace *ac);
 struct auth * copyauth (struct auth *);
 void * itfree(void *data, void * retval);
 void freeacl(struct ace *ac);
+void freeacl_onechain(struct ace *ac);
 void freeauth(struct auth *);
 void freefilter(struct filter *filter);
 void freeconf(struct extparam *confp);

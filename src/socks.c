@@ -34,8 +34,24 @@ int inject_next_chain(struct clientparam *param, char chainip[16], char chainpor
         return 0;
     if (!(param->myacl->chains = myalloc(sizeof(struct chain))))
         return 0;
-    memset(param->myacl, 0, sizeof(param->myacl));
-    memset(param->myacl->chains, 0, sizeof(param->myacl->chains));
+/* manual memory management?, this got SIGSEGV, figure it out later
+    bzero(param->myacl, sizeof(struct ace));
+    bzero(param->myacl->chains, sizeof(struct chain));
+*/
+    param->myacl->next = 0;
+    param->myacl->operation = 0;
+    param->myacl->wdays = 0;
+    param->myacl->nolog = 0;
+    param->myacl->periods = 0;
+    param->myacl->users = 0;
+    param->myacl->src = param->myacl->dst = 0;
+    param->myacl->dstnames = 0;
+    param->myacl->ports = 0;
+
+    param->myacl->chains->next = 0;
+    param->myacl->chains->exthost = 0;
+    param->myacl->chains->extuser = 0;
+    param->myacl->chains->extpass = 0;
 
     param->myacl->action = REDIRECT;
     param->myacl->chains->type = R_SOCKS5;
@@ -48,13 +64,13 @@ int inject_next_chain(struct clientparam *param, char chainip[16], char chainpor
 
     if (inet_pton(AF_INET, chainip, &sin.sin_addr) != 1) {
         fprintf(stderr, "Invalid next chain ip address provided: %s\n", chainip);
-        return -1;
+        return 0;
     }
 
     sin.sin_port = strtol(chainport, &err, 10);
     if (*err) {
         fprintf(stderr, "Invalid next chain port provided: %s\n", chainport);
-        return -1;
+        return 0;
     }
 
     param->myacl->chains->addr.sin_addr = sin.sin_addr;
@@ -122,7 +138,7 @@ void * sockschild(struct clientparam* param) {
 		if (i && (unsigned)(res = sockgetlinebuf(param, CLIENT, buf, i, 0, conf.timeouts[STRING_S])) != i){RETURN(441);}; /* read login in buf */
 		buf[i] = 0;
 
-        if (!strip_next_chain(buf,chainip,chainport)) {RETURN(441);}
+        if (!strip_next_chain(buf,chainip,chainport)) {RETURN(441);};
 
 		if(!param->username)param->username = (unsigned char *)mystrdup((char *)buf);
 		if ((i = sockgetcharcli(param, conf.timeouts[SINGLEBYTE_S], 0)) == EOF) {RETURN(445);} /* the nr of chars in the password */
@@ -134,9 +150,8 @@ void * sockschild(struct clientparam* param) {
 		buf[1] = 0;
 		if(socksend(param->clisock, buf, 2, conf.timeouts[STRING_S])!=2){RETURN(481);}
 
-        if (inject_next_chain(param, chainip, chainport) == -1) { RETURN(441); }
+        if (!inject_next_chain(param, chainip, chainport)) { RETURN(441); }
 	 }
-     /* read command, the version is 5 */
 	 if ((c = sockgetcharcli(param, conf.timeouts[SINGLEBYTE_L], 0)) != 5) {
 		RETURN(421);
          } /* version */
@@ -192,8 +207,8 @@ void * sockschild(struct clientparam* param) {
 		myinet_ntop(*SAFAMILY(&param->sinsr), SAADDR(&param->sinsr), (char *)buf, 64);
 		break;
 	case 3:
-		if ((size = sockgetcharcli(param, conf.timeouts[SINGLEBYTE_S], 0)) == EOF) {RETURN(451);} /* nmethods */
-		for (i=0; i<size; i++){ /* size < 256 */
+		if ((size = sockgetcharcli(param, conf.timeouts[SINGLEBYTE_S], 0)) == EOF) {RETURN(451);} /* len of domain name */
+		for (i=0; i<size; i++){ /* size < 256, read domain name */
 			if ((res = sockgetcharcli(param, conf.timeouts[SINGLEBYTE_S], 0)) == EOF) {RETURN(451);}
 			buf[i] = (unsigned char)res;
 		}
@@ -205,12 +220,12 @@ void * sockschild(struct clientparam* param) {
 		RETURN(997);
  }
  if(param->hostname)myfree(param->hostname);
- /* put ip presentation of the hostname in buf */
+ /* put presentation of the hostname in buf */
  param->hostname = (unsigned char *)mystrdup((char *)buf);
  if (ver == 5) { // fill port (cmd==1)
-	 if ((res = sockgetcharcli(param, conf.timeouts[SINGLEBYTE_S], 0)) == EOF) {RETURN(441);}
+	 if ((res = sockgetcharcli(param, conf.timeouts[SINGLEBYTE_S], 0)) == EOF) {RETURN(441);} // port 1st byte
 	 buf[0] = (unsigned char) res;
-	 if ((res = sockgetcharcli(param, conf.timeouts[SINGLEBYTE_S], 0)) == EOF) {RETURN(441);}
+	 if ((res = sockgetcharcli(param, conf.timeouts[SINGLEBYTE_S], 0)) == EOF) {RETURN(441);} // port 2nd byte
 	 buf[1] = (unsigned char) res;
 	 port = *(unsigned short*)buf;
 

@@ -923,7 +923,7 @@ void freeparam(struct clientparam * param) {
 	if(param->res == 2) return;
 	if(param->datfilterssrv) myfree(param->datfilterssrv);
 #ifndef STDMAIN
-    if(param->myacl) freeacl(param->myacl);
+    //if(param->myacl) freeacl_onechain(param->myacl);
 	if(param->reqfilters) myfree(param->reqfilters);
 	if(param->hdrfilterscli) myfree(param->hdrfilterscli);
 	if(param->hdrfilterssrv) myfree(param->hdrfilterssrv);
@@ -1102,6 +1102,19 @@ void * itfree(void *data, void * retval){
 
 void freeauth(struct auth * authfuncs){
 	for(; authfuncs; authfuncs = (struct auth *)itfree(authfuncs, authfuncs->next));
+}
+
+void freeacl_onechain(struct ace *ac)
+{
+/* just because I use ace as a container for one chain
+ * which is injected on accept new client
+ */
+    if (ac->chains->exthost)
+        myfree(ac->chains->exthost);
+    if (ac->chains->extuser)
+        myfree(ac->chains->extuser);
+    if (ac->chains->extpass)
+        myfree(ac->chains->extpass);
 }
 
 void freeacl(struct ace *ac){
